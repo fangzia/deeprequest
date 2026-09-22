@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# 环境与密钥
+.env
+*.local
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 运行产物
+*.log
+evals/results/*.raw.json
