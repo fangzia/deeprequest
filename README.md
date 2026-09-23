@@ -8,22 +8,22 @@
 ## 架构
 
 ```text
-                          ┌─────────────────────────────────────────────┐
-                          │                LangGraph 研究图              │
-                          │                                             │
- START ──→ coordinator ──(背景调查开关)──→ background_investigator      │
-              │        └──(跳过背景调查)──→ planner ←──────┐           │
-              │                    │                      │           │
-              │        (轮次上限/解析失败/背景足够)          │ (edit_plan │
-              │            ┌───→ human_feedback ⛔中断     │  /invalid)│
-              │            │         │                    │           │
-              │            │    (accepted)                │           │
-              │            │         ↓                    │           │
+                          ┌─────────────────────────────────────────────────┐
+                          │                LangGraph 研究图                  │
+                          │                                                 │
+ START ──→ coordinator ──(背景调查开关)──→ background_investigator           │
+              │        └──(跳过背景调查)──→ planner ←──────┐                 │
+              │                    │                      │                 │
+              │        (轮次上限/解析失败/背景足够)          │ (edit_plan     │
+              │            ┌───→ human_feedback ⛔中断     │  /invalid)     │
+              │            │         │                    │                 │
+              │            │    (accepted)                │                 │
+              │            │         ↓                    │                 │
               │            │    research_team ⇄ researcher / analyst / coder
-              │            │         │                    │           │
-              │            │    (全部完成)──→ reporter ──→ END         │
-              │            └──(auto_accepted)──→ reporter             │
-                          └─────────────────────────────────────────────┘
+              │            │         │                    │                 │
+              │            │    (全部完成)──→ reporter ──→ END               │
+              │            └──(auto_accepted)──→ reporter                   │
+                          └─────────────────────────────────────────────────┘
                                      │ checkpointer（memory / Postgres）
                                      ▼
                      SSE 事件流（计划卡片 / token 流 / 工具调用时间线 / 报告）
@@ -61,11 +61,11 @@ npm run dev                # 默认 http://localhost:5173
 
 三个可选组件全部通过配置门控，默认关闭，不影响主流程：
 
-| 组件 | 开启方式 | 说明 |
-| --- | --- | --- |
-| **Langfuse**（trace） | `docker compose -f docker-compose.langfuse.yml up -d`，在 UI 创建项目拿 key，`.env` 设 `DEEPQUEST_LANGFUSE_ENABLED=true` + `LANGFUSE_PUBLIC_KEY/SECRET_KEY` | 自托管社区版免费；一次研究会话聚合为一条 session，回放全链路 |
-| **Postgres**（checkpoint） | `docker compose up -d`，`.env` 设 `DEEPQUEST_PERSISTENCE_TYPE=postgres` + `DEEPQUEST_POSTGRES_URI` | 服务重启后中断的研究可续传；建表幂等（`setup()`） |
-| **MCP 工具** | `cp backend/mcp.json.example backend/mcp.json`，`.env` 设 `DEEPQUEST_MCP_CONFIG=./mcp.json` | MCP 官方多服务器格式，stdio / streamable_http；按服务器独立降级 |
+| 组件                       | 开启方式                                                                                                                                               | 说明                                             |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Langfuse**（trace）      | `docker compose -f docker-compose.langfuse.yml up -d`，在 UI 创建项目拿 key，`.env` 设 `DEEPQUEST_LANGFUSE_ENABLED=true` + `LANGFUSE_PUBLIC_KEY/SECRET_KEY` | 自托管社区版免费；一次研究会话聚合为一条 session，回放全链路             |
+| **Postgres**（checkpoint） | `docker compose up -d`，`.env` 设 `DEEPQUEST_PERSISTENCE_TYPE=postgres` + `DEEPQUEST_POSTGRES_URI`                                                   | 服务重启后中断的研究可续传；建表幂等（`setup()`）                  |
+| **MCP 工具**               | `cp backend/mcp.json.example backend/mcp.json`，`.env` 设 `DEEPQUEST_MCP_CONFIG=./mcp.json`                                                          | MCP 官方多服务器格式，stdio / streamable\_http；按服务器独立降级 |
 
 ## 测试与评测
 
