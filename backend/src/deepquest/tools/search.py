@@ -50,4 +50,6 @@ def get_web_search_tool(max_results: int = 3) -> BaseTool:
         name=SEARCH_TOOL_NAME,
         max_results=max_results,
         search_depth="advanced",
+        # 显式传参而非依赖进程环境变量（pydantic-settings 读 .env 不会导出到 os.environ）
+        tavily_api_key=settings.tavily_api_key,
     )

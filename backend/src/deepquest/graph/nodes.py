@@ -34,6 +34,7 @@ from deepquest.llm.provider import get_llm
 from deepquest.prompts import apply_prompt_template
 from deepquest.prompts.models import Plan, Source
 from deepquest.tools import crawl_tool, get_web_search_tool, python_repl_tool
+from deepquest.tools.mcp import load_mcp_tools
 
 logger = logging.getLogger(__name__)
 
@@ -514,11 +515,13 @@ def _extract_partial_result(result_state: dict | None, step_title: str) -> str:
 
 
 async def researcher_node(state: State, config: RunnableConfig) -> dict:
-    """研究员节点：使用网络搜索与网页抓取工具收集信息。"""
+    """研究员节点：内置搜索/抓取工具，外加可选的 MCP 工具收集信息。"""
     logger.info("researcher 节点运行中")
     configurable = (config or {}).get("configurable", {})
     max_search_results = configurable.get("max_search_results", 3)
     tools = [get_web_search_tool(max_search_results), crawl_tool]
+    # MCP 工具（可选）：未配置或加载失败时返回空列表，不影响内置工具
+    tools.extend(await load_mcp_tools())
     return await _execute_agent_step(state, config, "researcher", tools)
 
 

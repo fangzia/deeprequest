@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "deepwiki": {
+      "transport": "streamable_http",
+      "url": "https://mcp.deepwiki.com/mcp"
+    }
+  }
+}

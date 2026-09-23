@@ -16,6 +16,6 @@ test:
 lint:
 	cd backend && uv run ruff check src tests
 
-# 评测（Phase 4 交付）
+# 引用一致性评测（对 {"report": ..., "sources": [...]} 格式的 JSON 文件）
 eval:
-	cd backend && uv run python -m evals.runner
+	cd backend && uv run python -m deepquest.evals.citation $(FILE)

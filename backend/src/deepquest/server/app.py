@@ -12,12 +12,14 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
 from sse_starlette.sse import EventSourceResponse
 
 from deepquest.config.settings import get_settings
 from deepquest.graph.builder import build_graph
+from deepquest.observability import attach_langfuse_trace, flush_langfuse
 from deepquest.prompts.models import Plan, Source, Step, StepType
 from deepquest.server.schemas import ChatRequest, ResumeRequest
 from deepquest.server.sse import make_event, process_message_chunk, process_updates
@@ -28,29 +30,48 @@ logger = logging.getLogger(__name__)
 _GRAPH_RECURSION_LIMIT = 150
 
 
-def _make_checkpointer() -> MemorySaver:
-    """构造 Phase 1 的内存检查点保存器。
+def _make_serializer() -> JsonPlusSerializer:
+    """构造 checkpoint 序列化器。
 
     显式把 deepquest.prompts.models 注册进 msgpack 反序列化白名单，
     避免 checkpoint 恢复时 Plan/StepType 触发"unregistered type"警告
     （该行为在未来 langgraph 版本默认会被阻断）。
     """
-    serializer = JsonPlusSerializer(
-        allowed_msgpack_modules=[Plan, Step, StepType, Source]
-    )
-    return MemorySaver(serde=serializer)
+    return JsonPlusSerializer(allowed_msgpack_modules=[Plan, Step, StepType, Source])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时构建研究图（Phase 1 固定使用 MemorySaver）。"""
+    """应用生命周期：按 persistence_type 构建研究图与检查点保存器。
+
+    - ``memory``（默认）：MemorySaver，零依赖，进程重启即丢失；
+    - ``postgres``：AsyncPostgresSaver，跨进程/重启持久化，启动时自动建表
+      （``setup()`` 幂等，可安全重复执行）。
+    """
     settings = get_settings()
+    serializer = _make_serializer()
+
     if settings.persistence_type == "postgres":
-        # Postgres 持久化在 Phase 3 交付，当前回退到内存模式
-        logger.info("persistence_type=postgres 将在 Phase 3 支持，本次回退 MemorySaver")
-    app.state.graph = build_graph(checkpointer=_make_checkpointer())
-    logger.info("DeepQuest 研究图已初始化（MemorySaver）")
-    yield
+        if not settings.postgres_uri:
+            raise RuntimeError(
+                "persistence_type=postgres 需要配置 DEEPQUEST_POSTGRES_URI"
+                "（示例：postgresql://deepquest:deepquest@localhost:5432/deepquest）"
+            )
+        async with AsyncPostgresSaver.from_conn_string(
+            settings.postgres_uri, serde=serializer
+        ) as saver:
+            await saver.setup()
+            app.state.graph = build_graph(checkpointer=saver)
+            logger.info("DeepQuest 研究图已初始化（AsyncPostgresSaver，持久化已就绪）")
+            yield
+    else:
+        app.state.graph = build_graph(
+            checkpointer=MemorySaver(serde=serializer)
+        )
+        logger.info("DeepQuest 研究图已初始化（MemorySaver）")
+        yield
+
+    flush_langfuse()
 
 
 app = FastAPI(title="DeepQuest", lifespan=lifespan)
@@ -158,6 +179,9 @@ async def research(request: ChatRequest, http_request: Request) -> EventSourceRe
         },
         "recursion_limit": _GRAPH_RECURSION_LIMIT,
     }
+
+    # 可选 Langfuse trace：session 绑定 thread_id，一次研究会话聚合为一条 session
+    config = attach_langfuse_trace(config, thread_id)
 
     if request.resume is not None:
         if not request.thread_id:

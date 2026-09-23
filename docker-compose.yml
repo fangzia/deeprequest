@@ -1,0 +1,31 @@
+# DeepQuest 应用依赖：Postgres（研究进度 checkpoint 持久化）
+#
+# 用法：
+#   docker compose up -d
+#   然后在 backend/.env 中设置：
+#     DEEPQUEST_PERSISTENCE_TYPE=postgres
+#     DEEPQUEST_POSTGRES_URI=postgresql://deepquest:deepquest@localhost:5432/deepquest
+#
+# Langfuse（可观测性，可选）见 docker-compose.langfuse.yml。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: deepquest-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deepquest
+      POSTGRES_PASSWORD: deepquest
+      POSTGRES_DB: deepquest
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - deepquest_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepquest"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  deepquest_pgdata:

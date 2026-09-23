@@ -33,15 +33,21 @@ class Settings(BaseSettings):
     # ===== 网页抓取（Jina Reader，key 可选，无 key 时走匿名限流）=====
     jina_api_key: str = ""
 
-    # ===== 持久化：memory（零依赖）或 postgres（Phase 3 交付）=====
+    # ===== 持久化：memory（零依赖）或 postgres =====
     persistence_type: str = "memory"
     postgres_uri: str = ""
 
-    # ===== 可观测性（Phase 2 填充，仅保留开关与连接占位）=====
+    # ===== MCP 工具（可选，MCP 多服务器配置文件路径，空则禁用）=====
+    mcp_config: str = ""
+
+    # ===== 可观测性（Langfuse，可选组件，自托管免费）=====
+    # .env 中无 DEEPQUEST_ 前缀，因此显式声明别名
     langfuse_enabled: bool = False
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_host: str = "http://localhost:3000"
+    langfuse_public_key: str = Field(default="", validation_alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str = Field(default="", validation_alias="LANGFUSE_SECRET_KEY")
+    langfuse_host: str = Field(
+        default="http://localhost:3000", validation_alias="LANGFUSE_HOST"
+    )
 
 
 @lru_cache
