@@ -1,15 +1,20 @@
 <template>
-  <el-card class="plan-card" shadow="never">
+  <el-dialog
+    v-model="visible"
+    title="确认研究计划"
+    width="680px"
+    align-center
+    :close-on-click-modal="false"
+    class="plan-confirm-dialog"
+  >
     <template #header>
-      <div class="plan-header">
-        <span class="plan-header-title">研究计划</span>
-        <el-tag v-if="!planComplete" size="small" type="info" effect="plain">生成中…</el-tag>
-        <el-tag v-else-if="awaitingApproval" size="small" type="warning">待确认</el-tag>
-        <el-tag v-else size="small" type="success">已确认</el-tag>
+      <div class="dialog-header">
+        <span class="dialog-title">确认研究计划</span>
+        <el-tag size="small" type="warning">等待人工确认</el-tag>
       </div>
     </template>
 
-    <template v-if="plan">
+    <div v-if="plan" class="dialog-body">
       <h3 class="plan-topic">{{ plan.title || '（未命名研究主题）' }}</h3>
       <p v-if="plan.thought" class="plan-thought">{{ plan.thought }}</p>
 
@@ -25,23 +30,53 @@
           </div>
           <p class="plan-step-desc">{{ step.description }}</p>
         </div>
-        <p v-if="!plan.steps.length" class="plan-steps-empty">（步骤生成中…）</p>
+      </div>
+
+      <el-input
+        v-model="feedback"
+        type="textarea"
+        :rows="3"
+        maxlength="500"
+        show-word-limit
+        placeholder="修改意见（可选）：填写后规划师将按意见重新规划；留空请直接点击「接受计划」"
+      />
+    </div>
+
+    <template #footer>
+      <div class="dialog-footer">
+        <el-button type="primary" size="large" :loading="submitting" @click="emit('accept')">
+          接受计划，开始研究
+        </el-button>
+        <el-button
+          size="large"
+          :disabled="!feedback.trim()"
+          :loading="submitting"
+          @click="emit('feedback', feedback.trim())"
+        >
+          提交修改意见
+        </el-button>
       </div>
     </template>
-    <p v-else class="plan-loading">正在生成研究计划…</p>
-  </el-card>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import type { Plan, StepType } from '../types'
 
+/** 弹窗可见性（v-model:visible） */
+const visible = defineModel<boolean>('visible', { default: false })
+
 defineProps<{
-  /** 当前解析出的研究计划（流式期间可能为 null 或不完整） */
+  /** 待确认的研究计划 */
   plan: Plan | null
-  /** plan JSON 是否已完整接收（流式期间 false，展示"生成中"） */
-  planComplete: boolean
-  /** 是否处于"等待确认"状态（确认操作在弹窗中进行，这里仅展示状态标签） */
-  awaitingApproval: boolean
+  /** 续传（接受/反馈）请求进行中 */
+  submitting: boolean
+}>()
+
+const emit = defineEmits<{
+  accept: []
+  feedback: [content: string]
 }>()
 
 /** 步骤类型的中文标签 */
@@ -57,30 +92,41 @@ const STEP_TAG: Record<StepType, 'primary' | 'warning' | 'info'> = {
   analysis: 'warning',
   processing: 'info',
 }
+
+/** 修改意见输入框 */
+const feedback = ref('')
+
+// 弹窗关闭（接受后进入研究）时清空上次的修改意见
+watch(visible, v => {
+  if (!v) feedback.value = ''
+})
 </script>
 
 <style scoped>
-.plan-card {
-  border-radius: 8px;
-}
-
-.plan-header {
+.dialog-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
 }
 
-.plan-header-title {
+.dialog-title {
+  font-size: 17px;
   font-weight: 600;
 }
 
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .plan-topic {
-  margin: 0 0 8px;
-  font-size: 17px;
+  margin: 0;
+  font-size: 16px;
 }
 
 .plan-thought {
-  margin: 0 0 12px;
+  margin: 0;
   padding: 8px 12px;
   background: #f5f7fa;
   border-radius: 6px;
@@ -92,7 +138,10 @@ const STEP_TAG: Record<StepType, 'primary' | 'warning' | 'info'> = {
 .plan-steps {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .plan-step {
@@ -123,6 +172,7 @@ const STEP_TAG: Record<StepType, 'primary' | 'warning' | 'info'> = {
 
 .plan-step-title {
   font-weight: 600;
+  font-size: 14px;
 }
 
 .plan-step-desc {
@@ -132,14 +182,9 @@ const STEP_TAG: Record<StepType, 'primary' | 'warning' | 'info'> = {
   line-height: 1.6;
 }
 
-.plan-steps-empty {
-  margin: 0;
-  color: #909399;
-  font-size: 13px;
-}
-
-.plan-loading {
-  margin: 0;
-  color: #909399;
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

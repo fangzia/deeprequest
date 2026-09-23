@@ -23,6 +23,15 @@
     <div v-if="status !== 'idle'" class="status-bar">
       <el-tag :type="statusTagType" effect="light">{{ statusText }}</el-tag>
       <span v-if="topic" class="status-topic">主题：{{ topic }}</span>
+      <el-button
+        v-if="status === 'awaiting_approval' && !confirmDialogVisible"
+        size="small"
+        type="warning"
+        plain
+        @click="confirmDialogVisible = true"
+      >
+        打开计划确认弹窗
+      </el-button>
     </div>
 
     <!-- 错误提示 -->
@@ -36,19 +45,30 @@
       :closable="false"
     />
 
-    <!-- 过程区：研究计划 + 研究过程时间线 -->
+    <!-- 过程区：研究计划 + 步骤进度 + 研究过程时间线 -->
     <div v-if="showPlan || timeline.length" class="process-section">
       <PlanCard
         v-if="showPlan"
         :plan="plan"
         :plan-complete="planComplete"
         :awaiting-approval="status === 'awaiting_approval'"
-        :submitting="submitting"
-        @accept="onAccept"
-        @feedback="onFeedback"
+      />
+      <StepProgress
+        v-if="showStepProgress"
+        :steps="plan?.steps ?? []"
+        :step-statuses="stepStatuses"
       />
       <ActivityTimeline v-if="timeline.length" class="timeline-block" :items="timeline" />
     </div>
+
+    <!-- 人工确认弹窗：研究计划等待确认时弹出 -->
+    <PlanConfirmDialog
+      v-model:visible="confirmDialogVisible"
+      :plan="plan"
+      :submitting="submitting"
+      @accept="onAccept"
+      @feedback="onFeedback"
+    />
 
     <!-- 报告区：最终报告 + 引用来源 -->
     <div v-if="displayReport" class="report-section">
@@ -66,10 +86,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useResearchStore } from '../stores/research'
 import PlanCard from '../components/PlanCard.vue'
+import PlanConfirmDialog from '../components/PlanConfirmDialog.vue'
+import StepProgress from '../components/StepProgress.vue'
 import ActivityTimeline from '../components/ActivityTimeline.vue'
 import ReportView from '../components/ReportView.vue'
 import SourceList from '../components/SourceList.vue'
@@ -82,6 +104,7 @@ const {
   autoAcceptedPlan,
   plan,
   planComplete,
+  stepStatuses,
   timeline,
   sources,
   errorMessage,
@@ -92,6 +115,13 @@ const {
 
 /** 主题输入框内容 */
 const topicInput = ref('')
+
+/** 计划确认弹窗可见性：进入 awaiting_approval 时自动弹出，离开时自动关闭 */
+const confirmDialogVisible = ref(false)
+watch(status, s => {
+  if (s === 'awaiting_approval') confirmDialogVisible.value = true
+  else confirmDialogVisible.value = false
+})
 
 /** 各状态对应的中文文案 */
 const STATUS_TEXT: Record<ResearchStatus, string> = {
@@ -125,6 +155,13 @@ const canSubmit = computed(() => !busy.value && topicInput.value.trim().length >
 
 /** 是否展示计划卡片（规划中或已有计划） */
 const showPlan = computed(() => plan.value !== null || status.value === 'planning')
+
+/** 是否展示步骤进度条（确认通过后、研究/成稿阶段） */
+const showStepProgress = computed(
+  () =>
+    (status.value === 'researching' || status.value === 'reporting') &&
+    !!plan.value?.steps.length,
+)
 
 function onStart() {
   if (!canSubmit.value) return

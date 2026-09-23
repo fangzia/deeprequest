@@ -206,6 +206,8 @@ export const useResearchStore = defineStore('research', () => {
   const planRaw = ref('')
   /** plan JSON 是否已完整解析（流式期间为 false，用于 UI 展示"生成中"） */
   const planComplete = ref(false)
+  /** 各计划步骤的执行状态（key 为步骤标题：pending → running → done） */
+  const stepStatuses = ref<Record<string, 'pending' | 'running' | 'done'>>({})
 
   const timeline = ref<TimelineItem[]>([])
   /** reporter 的报告草稿（流式） */
@@ -263,6 +265,27 @@ export const useResearchStore = defineStore('research', () => {
     if (status.value === 'planning' || status.value === 'awaiting_approval' || status.value === 'researching') {
       status.value = 'researching'
     }
+    advanceStepToRunning()
+  }
+
+  /** 将步骤状态表与当前 plan 同步（新步骤置为 pending，保留已有状态，移除废弃标题） */
+  function syncStepStatuses() {
+    if (!plan.value) return
+    const next: Record<string, 'pending' | 'running' | 'done'> = {}
+    for (const s of plan.value.steps) {
+      next[s.title] = stepStatuses.value[s.title] ?? 'pending'
+    }
+    stepStatuses.value = next
+  }
+
+  /** 研究活动开始时：若当前没有 running 步骤，则将第一个 pending 步骤置为 running */
+  function advanceStepToRunning() {
+    const statuses = stepStatuses.value
+    const titles = Object.keys(statuses)
+    if (!titles.length) return
+    if (titles.some(t => statuses[t] === 'running')) return
+    const firstPending = titles.find(t => statuses[t] === 'pending')
+    if (firstPending) statuses[firstPending] = 'running'
   }
 
   /** 从工具结果文本中尽力提取引用来源（搜索/爬虫结果为 JSON 结构时） */
@@ -299,6 +322,7 @@ export const useResearchStore = defineStore('research', () => {
       if (parsed.plan) {
         plan.value = parsed.plan
         planComplete.value = parsed.complete
+        syncStepStatuses()
       }
       return
     }
@@ -379,6 +403,11 @@ export const useResearchStore = defineStore('research', () => {
 
   function handleStepResult(agent: AgentType, stepTopic: string, content: string) {
     markResearching(agent)
+    // 步骤完成：标记 done，并把下一个 pending 步骤提前置为 running
+    if (stepTopic && stepStatuses.value[stepTopic] !== undefined) {
+      stepStatuses.value[stepTopic] = 'done'
+      advanceStepToRunning()
+    }
     pushTimeline({ kind: 'step', agent, topic: stepTopic, content })
   }
 
@@ -393,6 +422,13 @@ export const useResearchStore = defineStore('research', () => {
     plan.value = parsed.plan
     planComplete.value = true
     planRaw.value = e.plan
+    // 重新规划时标题可能变化：以最新 plan 为准重建步骤状态（保留已完成）
+    const prevStatuses = { ...stepStatuses.value }
+    const next: Record<string, 'pending' | 'running' | 'done'> = {}
+    for (const s of parsed.plan.steps) {
+      next[s.title] = prevStatuses[s.title] ?? 'pending'
+    }
+    stepStatuses.value = next
     status.value = 'awaiting_approval'
   }
 
@@ -403,7 +439,10 @@ export const useResearchStore = defineStore('research', () => {
   }
 
   function handleEnd(finalReportText: string) {
-    finalReport.value = finalReportText
+    if (finalReportText) finalReport.value = finalReportText
+    // interrupt 后后端仍会发 end（final_report 为空）：保持 awaiting_approval，等用户确认
+    // error 后的 end 同理，不覆盖错误状态
+    if (status.value === 'awaiting_approval' || status.value === 'error') return
     status.value = 'done'
   }
 
@@ -528,6 +567,7 @@ export const useResearchStore = defineStore('research', () => {
     plan.value = null
     planRaw.value = ''
     planComplete.value = false
+    stepStatuses.value = {}
     timeline.value = []
     reportDraft.value = ''
     finalReport.value = ''
@@ -545,6 +585,7 @@ export const useResearchStore = defineStore('research', () => {
     autoAcceptedPlan,
     plan,
     planComplete,
+    stepStatuses,
     timeline,
     reportDraft,
     finalReport,

@@ -3,72 +3,78 @@
     <template #header>
       <div class="timeline-header">
         <span class="timeline-header-title">研究过程</span>
-        <span class="timeline-header-count">共 {{ items.length }} 条记录</span>
+        <span class="timeline-header-stats">{{ statsText }}</span>
       </div>
     </template>
 
-    <el-timeline v-if="items.length" class="activity-timeline">
-      <el-timeline-item
-        v-for="item in items"
-        :key="item.id"
-        :type="dotType(item)"
-        :timestamp="item.time"
-        placement="top"
-      >
-        <!-- 工具调用：图标 + 工具名 + 状态，可展开查看参数与结果 -->
-        <div v-if="item.kind === 'tool'" class="tl-item">
-          <div class="tl-head clickable" @click="toggle(item.id)">
-            <svg class="tool-icon" :class="item.status" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M14.7 6.3a4.5 4.5 0 0 0-6.03 5.36L3.7 16.63a2 2 0 1 0 2.83 2.83l4.97-4.97a4.5 4.5 0 0 0 5.36-6.03l-2.4 2.4-2.83-2.83 2.4-2.4z"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="tool-name">{{ item.toolName || '工具调用' }}</span>
-            <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
-            <span v-if="item.status === 'running'" class="tool-running">执行中…</span>
-            <el-tag v-else-if="item.status === 'error'" size="small" type="danger">失败</el-tag>
-            <el-tag v-else size="small" type="success">完成</el-tag>
-            <span class="expand-hint">{{ expanded.includes(item.id) ? '收起' : '展开' }}</span>
-          </div>
-          <div v-show="expanded.includes(item.id)" class="tl-body">
-            <pre v-if="item.args" class="tool-block"><span class="block-label">参数</span>{{ prettyJson(item.args) }}</pre>
-            <pre v-if="item.resultContent" class="tool-block" :class="{ 'is-error': item.status === 'error' }"><span class="block-label">结果</span>{{ brief(prettyJson(item.resultContent)) }}</pre>
-          </div>
-        </div>
+    <!-- 顶部实时动态：当前正在执行的操作 -->
+    <div v-if="latestActivity" class="live-bar">
+      <span class="live-dot"></span>
+      <span class="live-text">{{ latestActivity }}</span>
+    </div>
 
-        <!-- 步骤结果：agent 标签 + 步骤标题 + 可折叠内容 -->
-        <div v-else-if="item.kind === 'step'" class="tl-item">
-          <div class="tl-head clickable" @click="toggle(item.id)">
-            <span class="step-badge">步骤</span>
-            <span class="step-topic">{{ item.topic }}</span>
-            <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
-            <span class="expand-hint">{{ expanded.includes(item.id) ? '收起' : '展开' }}</span>
+    <div ref="scrollRef" class="timeline-scroll">
+      <el-timeline v-if="items.length" class="activity-timeline">
+        <el-timeline-item
+          v-for="item in items"
+          :key="item.id"
+          :type="dotType(item)"
+          :timestamp="item.time"
+          placement="top"
+        >
+          <!-- 工具调用：友好名称 + 参数摘要，可展开查看参数与原始结果 -->
+          <div v-if="item.kind === 'tool'" class="tl-item">
+            <div class="tl-head clickable" @click="toggle(item.id)">
+              <span class="tool-icon" :class="item.status">{{ toolMeta(item).icon }}</span>
+              <span class="tool-name">{{ toolMeta(item).label }}</span>
+              <span v-if="argSummary(item)" class="tool-arg">{{ argSummary(item) }}</span>
+              <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
+              <span v-if="item.status === 'running'" class="tool-running">执行中…</span>
+              <el-tag v-else-if="item.status === 'error'" size="small" type="danger">失败</el-tag>
+              <el-tag v-else size="small" type="success">完成</el-tag>
+              <span class="expand-hint">{{ expanded.includes(item.id) ? '收起' : '详情' }}</span>
+            </div>
+            <p v-if="resultSummary(item)" class="tool-result-summary" :class="{ 'is-error': item.status === 'error' }">
+              {{ resultSummary(item) }}
+            </p>
+            <div v-show="expanded.includes(item.id)" class="tl-body">
+              <pre v-if="item.args" class="tool-block"><span class="block-label">参数</span>{{ prettyJson(item.args) }}</pre>
+              <pre v-if="item.resultContent" class="tool-block" :class="{ 'is-error': item.status === 'error' }"><span class="block-label">结果</span>{{ brief(prettyJson(item.resultContent)) }}</pre>
+            </div>
           </div>
-          <div v-show="expanded.includes(item.id)" class="tl-body">
-            <div class="step-content" v-html="renderMarkdown(item.content)"></div>
-          </div>
-        </div>
 
-        <!-- 智能体思考文本 -->
-        <div v-else class="tl-item">
-          <div class="tl-head">
-            <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
-            <span class="thinking-label">思考</span>
+          <!-- 步骤结果：agent 标签 + 步骤标题 + 可折叠内容 -->
+          <div v-else-if="item.kind === 'step'" class="tl-item">
+            <div class="tl-head clickable" @click="toggle(item.id)">
+              <span class="step-badge">✓ 步骤完成</span>
+              <span class="step-topic">{{ item.topic }}</span>
+              <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
+              <span class="expand-hint">{{ expanded.includes(item.id) ? '收起' : '查看结论' }}</span>
+            </div>
+            <p class="step-brief">{{ plainBrief(item.content) }}</p>
+            <div v-show="expanded.includes(item.id)" class="tl-body">
+              <div class="step-content" v-html="renderMarkdown(item.content)"></div>
+            </div>
           </div>
-          <p class="thinking-text">{{ item.content }}</p>
-        </div>
-      </el-timeline-item>
-    </el-timeline>
-    <p v-else class="timeline-empty">研究尚未开始，暂无过程记录。</p>
+
+          <!-- 智能体思考文本：默认两行截断，点击展开 -->
+          <div v-else class="tl-item">
+            <div class="tl-head clickable" @click="toggle(item.id)">
+              <el-tag size="small" type="info" effect="plain">{{ agentLabel(item.agent) }}</el-tag>
+              <span class="thinking-label">思考</span>
+              <span class="expand-hint">{{ expanded.includes(item.id) ? '收起' : '展开' }}</span>
+            </div>
+            <p class="thinking-text" :class="{ expanded: expanded.includes(item.id) }">{{ item.content }}</p>
+          </div>
+        </el-timeline-item>
+      </el-timeline>
+      <p v-else class="timeline-empty">研究尚未开始，暂无过程记录。</p>
+    </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { AGENT_LABELS } from '../stores/research'
 import type { AgentType, TimelineItem } from '../types'
@@ -83,6 +89,9 @@ const md = new MarkdownIt({ linkify: true, breaks: true })
 
 /** 当前展开的条目 id 列表 */
 const expanded = ref<number[]>([])
+
+/** 滚动容器（自动跟随最新条目） */
+const scrollRef = ref<HTMLElement | null>(null)
 
 /** 最新的步骤结果条目 id（用于自动展开） */
 const latestStepId = computed(() => {
@@ -100,6 +109,126 @@ watch(
   },
   { immediate: true },
 )
+
+// 新条目到达时自动滚动到底部（若用户没有向上翻阅）
+watch(
+  () => props.items.length,
+  async () => {
+    const el = scrollRef.value
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (nearBottom) {
+      await nextTick()
+      el.scrollTop = el.scrollHeight
+    }
+  },
+)
+
+/** 顶部实时动态文案：取最后一条活动 */
+const latestActivity = computed(() => {
+  if (!props.items.length) return ''
+  const last = props.items[props.items.length - 1]
+  const agent = agentLabel(last.agent)
+  if (last.kind === 'tool') {
+    const label = toolMeta(last).label
+    if (last.status === 'running') return `${agent}正在${label}（${argSummary(last) || '…'}）`
+    return `${agent}${label}完成`
+  }
+  if (last.kind === 'step') return `步骤「${last.topic}」已完成`
+  return `${agent}正在思考…`
+})
+
+/** 头部统计文案 */
+const statsText = computed(() => {
+  const tools = props.items.filter(t => t.kind === 'tool')
+  const searches = tools.filter(t => t.toolName === 'web_search').length
+  const reads = tools.filter(t => t.toolName === 'crawl_tool').length
+  const parts = [`共 ${props.items.length} 条记录`]
+  if (searches) parts.push(`搜索 ${searches} 次`)
+  if (reads) parts.push(`阅读网页 ${reads} 篇`)
+  return parts.join(' · ')
+})
+
+/* ---------- 工具的友好展示 ---------- */
+
+const TOOL_META: Record<string, { label: string; icon: string }> = {
+  web_search: { label: '联网搜索', icon: '🔍' },
+  crawl_tool: { label: '阅读网页', icon: '📄' },
+  python_repl_tool: { label: '执行代码', icon: '💻' },
+}
+
+function toolMeta(item: TimelineItem): { label: string; icon: string } {
+  return TOOL_META[item.toolName ?? ''] ?? { label: item.toolName || '工具调用', icon: '🛠' }
+}
+
+/** 解析工具参数 JSON（流式期间可能不完整） */
+function parseArgs(item: TimelineItem): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(item.args || '{}')
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 工具入参的一行摘要：搜索词 / URL / 代码首行 */
+function argSummary(item: TimelineItem): string {
+  const args = parseArgs(item)
+  switch (item.toolName) {
+    case 'web_search': {
+      const q = args.query ?? args.q
+      return typeof q === 'string' ? q : ''
+    }
+    case 'crawl_tool': {
+      const url = args.url
+      if (typeof url !== 'string') return ''
+      return url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    }
+    case 'python_repl_tool': {
+      const code = args.code
+      if (typeof code !== 'string') return ''
+      const firstLine = code.split('\n').find(l => l.trim()) ?? ''
+      return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine
+    }
+    default: {
+      const values = Object.values(args).filter(v => typeof v === 'string') as string[]
+      const joined = values.join(' ')
+      return joined.length > 80 ? `${joined.slice(0, 80)}…` : joined
+    }
+  }
+}
+
+/** 工具结果的一行摘要（不展开也能看懂进展） */
+function resultSummary(item: TimelineItem): string {
+  if (item.status === 'running' || !item.resultContent) return ''
+  if (item.status === 'error') return briefText(item.resultContent, 120)
+  switch (item.toolName) {
+    case 'web_search': {
+      try {
+        const data = JSON.parse(item.resultContent)
+        const arr = Array.isArray(data) ? data : []
+        if (arr.length) {
+          const titles = arr
+            .map(r => (r && typeof r === 'object' && typeof (r as Record<string, unknown>).title === 'string' ? (r as Record<string, unknown>).title as string : ''))
+            .filter(Boolean)
+            .slice(0, 2)
+          return `找到 ${arr.length} 条结果${titles.length ? `：${titles.join('；')}` : ''}`
+        }
+      } catch {
+        // 非结构化结果，走通用摘要
+      }
+      return briefText(item.resultContent, 120)
+    }
+    case 'crawl_tool': {
+      if (/^error/i.test(item.resultContent)) return briefText(item.resultContent, 120)
+      return `已抓取 ${item.resultContent.length.toLocaleString()} 字符`
+    }
+    default:
+      return briefText(item.resultContent, 120)
+  }
+}
+
+/* ---------- 通用 ---------- */
 
 function toggle(id: number) {
   const idx = expanded.value.indexOf(id)
@@ -135,6 +264,21 @@ function brief(text: string, limit = 800): string {
   return text.length > limit ? `${text.slice(0, limit)}\n…（内容过长，已截断）` : text
 }
 
+/** 去掉 markdown 标记后的一行纯文本摘要 */
+function plainBrief(src?: string, limit = 100): string {
+  if (!src) return ''
+  const text = src
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`~\[\]()!-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
+}
+
+function briefText(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
+}
+
 function renderMarkdown(src?: string): string {
   return md.render(src ?? '')
 }
@@ -155,9 +299,50 @@ function renderMarkdown(src?: string): string {
   font-weight: 600;
 }
 
-.timeline-header-count {
+.timeline-header-stats {
   font-size: 12px;
   color: #909399;
+}
+
+/* 顶部实时动态 */
+.live-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 13px;
+}
+
+.live-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #409eff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.live-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 滚动容器：过程较长时保持固定高度，自动跟随最新活动 */
+.timeline-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .timeline-empty {
@@ -185,22 +370,19 @@ function renderMarkdown(src?: string): string {
 }
 
 .tool-icon {
-  width: 16px;
-  height: 16px;
-  color: #909399;
   flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .tool-icon.running {
-  color: #409eff;
+  animation: spin 1.6s linear infinite;
 }
 
-.tool-icon.success {
-  color: #67c23a;
-}
-
-.tool-icon.error {
-  color: #f56c6c;
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .tool-name {
@@ -208,9 +390,30 @@ function renderMarkdown(src?: string): string {
   font-size: 14px;
 }
 
+.tool-arg {
+  color: #606266;
+  font-size: 13px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-running {
   font-size: 12px;
   color: #409eff;
+}
+
+/* 工具结果摘要行 */
+.tool-result-summary {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #67c23a;
+  line-height: 1.5;
+}
+
+.tool-result-summary.is-error {
+  color: #f56c6c;
 }
 
 .step-badge {
@@ -225,6 +428,16 @@ function renderMarkdown(src?: string): string {
 .step-topic {
   font-weight: 600;
   font-size: 14px;
+}
+
+.step-brief {
+  margin: 4px 0 0;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .expand-hint {
@@ -245,6 +458,16 @@ function renderMarkdown(src?: string): string {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.thinking-text.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
 }
 
 .tl-body {
