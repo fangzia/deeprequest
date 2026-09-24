@@ -4,9 +4,10 @@
 
 ```text
 START → coordinator ──(背景调查开关)──→ background_investigator → planner
-                │                                              ↑
-                └──────────────(跳过背景调查)───────────────────┘
-planner ──(轮次上限/解析失败/背景足够)──→ reporter 或 __end__
+                │                                              ↑ │
+                └──────────────(跳过背景调查)───────────────────┘ │
+                                                  (解析失败且未超重试上限：自环重试)
+planner ──(研究轮次上限/重试超限/背景足够)──→ reporter 或 __end__
        └──(默认)──→ human_feedback ──(edit_plan/invalid)──→ planner
                             │
                             └──(accepted)──→ research_team ⇄ researcher/analyst/coder
@@ -70,7 +71,7 @@ def _build_base_graph() -> StateGraph:
     builder.add_conditional_edges(
         "planner",
         route_after_planner,
-        ["human_feedback", "reporter", END],
+        ["planner", "human_feedback", "reporter", END],
     )
 
     # ── 计划评审（human-in-the-loop）──────────────────────────

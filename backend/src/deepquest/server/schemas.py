@@ -36,7 +36,10 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list, description="用户会话消息")
     thread_id: str | None = Field(default=None, description="会话线程 ID；续传时必传")
     auto_accepted_plan: bool = Field(default=False, description="是否自动接受计划（跳过人工确认）")
-    max_plan_iterations: int = Field(default=1, description="最大计划轮次")
+    max_research_rounds: int = Field(
+        default=1, description="最大研究轮数（计划→执行的循环上限，仅在计划被接受时计数）"
+    )
+    max_plan_retries: int = Field(default=1, description="计划解析失败时的最大重试次数")
     max_step_num: int = Field(default=3, description="计划的最大步骤数")
     enable_background_investigation: bool = Field(
         default=True, description="是否在规划前执行背景调查"

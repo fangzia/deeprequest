@@ -5,7 +5,8 @@ researcher / analyst / coder / reporter（外加空的 research_team 汇聚节�
 
 节点只负责**状态更新**（返回 dict），全部路由决策集中在 routing.py 的
 纯函数中、由 builder.py 的边声明统一表达。节点与路由之间的信号约定：
-- planner 解析失败 → 写入 ``plan_error``（成功时置 None）；
+- planner 解析失败 → 写入 ``plan_error``（含模型原始输出，供重试时回注修正）
+  并累加 ``plan_retries``；成功时两者清零；
 - human_feedback 判定用户反馈 → 写入 ``feedback_decision``
   （accepted / edit_plan / invalid）。
 
@@ -232,20 +233,25 @@ def planner_node(state: State, config: RunnableConfig) -> dict:
     优先使用 ``llm.with_structured_output(Plan)`` 结构化输出；
     失败（返回 None 或抛异常）时回退到"普通调用 + json-repair 文本解析"路径。
 
-    路由信号：成功写入 ``current_plan`` 并清空 ``plan_error``；
-    解析失败写入 ``plan_error``，由 ``route_after_planner`` 决定去向。
-    轮次已达上限时提前返回（不调用 LLM），同样交由路由函数转 reporter。
+    重试机制：解析失败时写入 ``plan_error``（含模型原始输出）并累加
+    ``plan_retries``；若 state 中已有上次的 ``plan_error``（即重试进入），
+    会把错误信息回注到 prompt 让模型修正后重新输出。路由函数
+    ``route_after_planner`` 在未超 ``max_plan_retries`` 时回 planner 自环重试。
+
+    路由信号：成功写入 ``current_plan`` 并清空 ``plan_error`` / ``plan_retries``。
+    研究轮次（``research_rounds``）已达上限时提前返回（不调用 LLM），
+    同样交由路由函数转 reporter。
     """
     logger.info("planner 生成研究计划，locale=%s", state.get("locale", "zh-CN"))
     configurable = (config or {}).get("configurable", {})
-    max_plan_iterations = configurable.get("max_plan_iterations", 1)
+    max_research_rounds = configurable.get("max_research_rounds", 1)
     max_step_num = configurable.get("max_step_num", 3)
-    plan_iterations = state.get("plan_iterations") or 0
+    research_rounds = state.get("research_rounds") or 0
     locale = state.get("locale", "zh-CN")
 
-    # 计划轮次已达上限：跳过 LLM 调用，路由函数会直接转 reporter
-    if plan_iterations >= max_plan_iterations:
-        logger.info("计划轮次已达上限（%d），进入 reporter", max_plan_iterations)
+    # 研究轮次已达上限：跳过 LLM 调用，路由函数会直接转 reporter
+    if research_rounds >= max_research_rounds:
+        logger.info("研究轮次已达上限（%d），进入 reporter", max_research_rounds)
         return {}
 
     messages = apply_prompt_template(
@@ -261,6 +267,18 @@ def planner_node(state: State, config: RunnableConfig) -> dict:
                     "用户查询的背景调查结果：\n"
                     + state["background_investigation_results"]
                     + "\n"
+                ),
+            },
+        )
+    # 重试进入：回注上次失败信息，让模型针对性修正
+    if state.get("plan_error"):
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"上一次生成研究计划失败，错误信息：\n{state['plan_error']}\n"
+                    "请仔细检查并修正问题（确保输出严格符合要求的 JSON 结构），"
+                    "重新生成研究计划。"
                 ),
             },
         )
@@ -281,13 +299,22 @@ def planner_node(state: State, config: RunnableConfig) -> dict:
     # 路径二：普通调用 + json-repair 解析（兜底）
     if curr_plan is None:
         logger.info("planner 使用文本解析路径")
-        response = llm.invoke(messages)
-        full_response = str(response.content or "")
-        curr_plan = _parse_plan_or_none(full_response)
+        try:
+            response = llm.invoke(messages)
+            full_response = str(response.content or "")
+            curr_plan = _parse_plan_or_none(full_response)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("文本解析路径调用失败：%s", e)
+            full_response = f"（LLM 调用异常：{e}）"
 
     if curr_plan is None:
-        logger.warning("planner 输出无法解析为有效计划")
-        return {"plan_error": "planner 输出无法解析为有效计划"}
+        plan_retries = (state.get("plan_retries") or 0) + 1
+        raw = full_response.strip() if full_response.strip() else "（模型未返回可解析内容）"
+        logger.warning("planner 输出无法解析为有效计划（第 %d 次失败）", plan_retries)
+        return {
+            "plan_error": f"研究计划解析失败。模型原始输出：\n{raw}",
+            "plan_retries": plan_retries,
+        }
 
     plan_text = full_response or curr_plan.model_dump_json()
     logger.info("planner 计划生成成功：%s（%d 个步骤）", curr_plan.title, len(curr_plan.steps))
@@ -296,6 +323,7 @@ def planner_node(state: State, config: RunnableConfig) -> dict:
         "messages": [AIMessage(content=plan_text, name="planner")],
         "current_plan": curr_plan,
         "plan_error": None,
+        "plan_retries": 0,
     }
 
 
@@ -340,13 +368,13 @@ def human_feedback_node(state: State, config: RunnableConfig) -> dict:  # noqa: 
         logger.info("用户已接受计划")
 
     # 计划被接受（或自动接受）：解析并校验计划
-    plan_iterations = (state.get("plan_iterations") or 0) + 1
+    research_rounds = (state.get("research_rounds") or 0) + 1
 
     if isinstance(current_plan, str):
         current_plan = _parse_plan_or_none(current_plan)
 
     update: dict = {
-        "plan_iterations": plan_iterations,
+        "research_rounds": research_rounds,
         "feedback_decision": "accepted",
     }
     if isinstance(current_plan, Plan) and current_plan.steps:

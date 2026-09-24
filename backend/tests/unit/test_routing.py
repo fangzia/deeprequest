@@ -46,33 +46,43 @@ def test_coordinator_background_disabled_routes_to_planner():
 # ── route_after_planner ────────────────────────────────────────
 
 
-def _planner_config(max_plan_iterations: int = 1) -> dict:
-    return {"configurable": {"max_plan_iterations": max_plan_iterations}}
+def _planner_config(max_research_rounds: int = 1, max_plan_retries: int = 1) -> dict:
+    return {
+        "configurable": {
+            "max_research_rounds": max_research_rounds,
+            "max_plan_retries": max_plan_retries,
+        }
+    }
 
 
-def test_planner_max_iterations_routes_to_reporter():
-    """计划轮次已达上限时进入 reporter。"""
-    state = {"plan_iterations": 1, "current_plan": _make_plan([_step("research")])}
+def test_planner_max_rounds_routes_to_reporter():
+    """研究轮次已达上限时进入 reporter。"""
+    state = {"research_rounds": 1, "current_plan": _make_plan([_step("research")])}
     assert route_after_planner(state, _planner_config(1)) == "reporter"
 
 
-def test_planner_parse_error_first_iteration_ends():
-    """首轮解析失败且无既定轮次时终止图。"""
-    assert route_after_planner({"plan_iterations": 0, "plan_error": "bad"}, _planner_config()) == (
-        "__end__"
-    )
+def test_planner_parse_error_within_retry_limit_routes_to_planner():
+    """解析失败但未超重试上限时，回 planner 自环重试（携带错误反馈）。"""
+    state = {"research_rounds": 0, "plan_error": "bad", "plan_retries": 1}
+    assert route_after_planner(state, _planner_config(max_plan_retries=1)) == "planner"
 
 
-def test_planner_parse_error_with_history_routes_to_reporter():
-    """已有既定轮次时解析失败兜底进 reporter。"""
-    state = {"plan_iterations": 1, "plan_error": "bad"}
-    assert route_after_planner(state, _planner_config(2)) == "reporter"
+def test_planner_parse_error_retries_exhausted_without_rounds_ends():
+    """重试超限且无既定研究轮次时终止图。"""
+    state = {"research_rounds": 0, "plan_error": "bad", "plan_retries": 2}
+    assert route_after_planner(state, _planner_config(max_plan_retries=1)) == "__end__"
+
+
+def test_planner_parse_error_retries_exhausted_with_rounds_routes_to_reporter():
+    """重试超限但已有既定研究轮次时兜底进 reporter。"""
+    state = {"research_rounds": 1, "plan_error": "bad", "plan_retries": 2}
+    assert route_after_planner(state, _planner_config(2, max_plan_retries=1)) == "reporter"
 
 
 def test_planner_enough_context_routes_to_reporter():
     """背景已充分（has_enough_context）时直达 reporter。"""
     state = {
-        "plan_iterations": 0,
+        "research_rounds": 0,
         "current_plan": _make_plan([], enough_context=True),
     }
     assert route_after_planner(state, _planner_config()) == "reporter"
@@ -80,7 +90,7 @@ def test_planner_enough_context_routes_to_reporter():
 
 def test_planner_default_routes_to_feedback():
     """常规产出计划后进入人工评审。"""
-    state = {"plan_iterations": 0, "current_plan": _make_plan([_step("research")])}
+    state = {"research_rounds": 0, "current_plan": _make_plan([_step("research")])}
     assert route_after_planner(state, _planner_config()) == "human_feedback"
 
 
@@ -101,21 +111,21 @@ def test_feedback_accepted_valid_plan_routes_to_research_team():
     """接受且计划有效时进入研究团队。"""
     state = {
         "feedback_decision": "accepted",
-        "plan_iterations": 1,
+        "research_rounds": 1,
         "current_plan": _make_plan([_step("research")]),
     }
     assert route_after_feedback(state) == "research_team"
 
 
 def test_feedback_accepted_invalid_plan_routes_to_reporter():
-    """接受但计划无效、已有既定轮次时兜底进 reporter（与 planner 口径一致：> 0）。"""
-    state = {"feedback_decision": "accepted", "plan_iterations": 1, "current_plan": None}
+    """接受但计划无效、已有既定研究轮次时兜底进 reporter（与 planner 口径一致：> 0）。"""
+    state = {"feedback_decision": "accepted", "research_rounds": 1, "current_plan": None}
     assert route_after_feedback(state) == "reporter"
 
 
-def test_feedback_accepted_invalid_plan_without_iterations_ends():
-    """防御分支：接受但计划无效且无任何既定轮次（plan_iterations=0）时终止图。"""
-    state = {"feedback_decision": "accepted", "plan_iterations": 0, "current_plan": None}
+def test_feedback_accepted_invalid_plan_without_rounds_ends():
+    """防御分支：接受但计划无效且无任何既定研究轮次（research_rounds=0）时终止图。"""
+    state = {"feedback_decision": "accepted", "research_rounds": 0, "current_plan": None}
     assert route_after_feedback(state) == "__end__"
 
 

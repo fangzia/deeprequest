@@ -118,7 +118,7 @@ def _make_input(auto_accepted: bool) -> dict:
         "messages": [{"role": "user", "content": "测试主题"}],
         "research_topic": "测试主题",
         "locale": "zh-CN",
-        "plan_iterations": 0,
+        "research_rounds": 0,
         "final_report": "",
         "auto_accepted_plan": auto_accepted,
         "enable_background_investigation": True,
@@ -129,7 +129,8 @@ def _config(thread_id: str) -> dict:
     return {
         "configurable": {
             "thread_id": thread_id,
-            "max_plan_iterations": 1,
+            "max_research_rounds": 1,
+            "max_plan_retries": 1,
             "max_step_num": 3,
         },
         "recursion_limit": 150,
@@ -179,8 +180,8 @@ async def test_auto_accepted_plan_runs_to_report(fake_model):
     assert len(sources) == 1
     assert sources[0].url == "https://example.com/page"
     assert sources[0].title == "示例来源"
-    # 计划轮次推进
-    assert snapshot.values["plan_iterations"] == 1
+    # 研究轮次推进
+    assert snapshot.values["research_rounds"] == 1
 
 
 async def test_interrupt_and_resume_with_accepted(fake_model):
@@ -216,7 +217,7 @@ async def test_interrupt_and_resume_with_accepted(fake_model):
     snapshot = await graph.aget_state(config)
     assert snapshot.values["final_report"] == "# 测试研究报告\n\n结论摘要 [1]。"
     assert len(snapshot.values["sources"]) == 1
-    assert snapshot.values["plan_iterations"] == 1
+    assert snapshot.values["research_rounds"] == 1
 
 
 async def test_interrupt_edit_plan_feedback_returns_to_planner(fake_model):

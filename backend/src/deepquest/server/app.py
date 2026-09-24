@@ -91,7 +91,7 @@ def _build_workflow_input(request: ChatRequest) -> dict:
         "messages": messages,
         "research_topic": latest_content,
         "locale": "zh-CN",
-        "plan_iterations": 0,
+        "research_rounds": 0,
         "final_report": "",
         "current_plan": None,
         "observations": [],
@@ -108,7 +108,7 @@ def _build_resume_command(resume: ResumeRequest) -> Command:
         return Command(resume=f"[EDIT_PLAN] {resume.content or ''}")
 
     # edit_plan：直接采用前端编辑后的完整计划。
-    # 只更新 current_plan：计划轮次由 human_feedback 节点在重执行时统一 +1，
+    # 只更新 current_plan：研究轮次由 human_feedback 节点在重执行时统一 +1，
     # 此处再 +1 会因 interrupt 恢复的节点重跑语义被双重计数
     if not resume.plan:
         raise HTTPException(status_code=422, detail="edit_plan 恢复类型必须携带 plan 字段")
@@ -172,7 +172,8 @@ async def research(request: ChatRequest, http_request: Request) -> EventSourceRe
     config = {
         "configurable": {
             "thread_id": thread_id,
-            "max_plan_iterations": request.max_plan_iterations,
+            "max_research_rounds": request.max_research_rounds,
+            "max_plan_retries": request.max_plan_retries,
             "max_step_num": request.max_step_num,
         },
         "recursion_limit": _GRAPH_RECURSION_LIMIT,

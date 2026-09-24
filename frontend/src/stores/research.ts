@@ -500,7 +500,7 @@ export const useResearchStore = defineStore('research', () => {
     await send({
       messages: [{ role: 'user', content: trimmed }],
       auto_accepted_plan: autoAcceptedPlan.value,
-      max_plan_iterations: 1,
+      max_research_rounds: 1,
       max_step_num: 3,
       enable_background_investigation: true,
     })
@@ -515,7 +515,7 @@ export const useResearchStore = defineStore('research', () => {
       await send({
         thread_id: threadId.value,
         auto_accepted_plan: false,
-        max_plan_iterations: 1,
+        max_research_rounds: 1,
         max_step_num: 3,
         enable_background_investigation: true,
         resume: { type: 'accepted' },
@@ -538,7 +538,7 @@ export const useResearchStore = defineStore('research', () => {
       await send({
         thread_id: threadId.value,
         auto_accepted_plan: false,
-        max_plan_iterations: 1,
+        max_research_rounds: 1,
         max_step_num: 3,
         enable_background_investigation: true,
         resume: { type: 'feedback', content: trimmed },

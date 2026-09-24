@@ -21,7 +21,9 @@ class State(MessagesState):
     research_topic: str = ""
     observations: list[str] = []
     current_step: str = ""
-    plan_iterations: int = 0
+    # 已批准并派发执行的研究轮数：仅在 human_feedback 接受计划时自增。
+    # 注意它不是"规划尝试次数"——planner 的解析重试由 plan_retries 单独计数。
+    research_rounds: int = 0
     current_plan: Plan | str | None = None
     final_report: str = ""
     auto_accepted_plan: bool = False
@@ -32,5 +34,10 @@ class State(MessagesState):
     sources: list[Source] = []
 
     # 路由信号（节点写入、routing.py 的条件边函数读取）
-    plan_error: str | None = None  # planner 解析失败信号；成功时由节点置 None
-    feedback_decision: str | None = None  # accepted / edit_plan / invalid
+    # planner 解析失败信号（含模型原始输出，重试时回注给 planner 修正）；成功时置 None
+    plan_error: str | None = None
+    # planner 解析失败的重试计数（每次失败 +1，成功清零）；
+    # 超过 max_plan_retries 后不再重试，兜底进 reporter 或终止
+    plan_retries: int = 0
+    # human_feedback 对用户反馈的判定结果（accepted / edit_plan / invalid）
+    feedback_decision: str | None = None

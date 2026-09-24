@@ -73,7 +73,10 @@ export interface ResearchRequestBody {
   /** 续传（interrupt 后）必填 */
   thread_id?: string
   auto_accepted_plan?: boolean
-  max_plan_iterations?: number
+  /** 最大研究轮数（计划→执行的循环上限） */
+  max_research_rounds?: number
+  /** 计划解析失败时的最大重试次数 */
+  max_plan_retries?: number
   max_step_num?: number
   enable_background_investigation?: boolean
   /** 仅续传请求携带 */

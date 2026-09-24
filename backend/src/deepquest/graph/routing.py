@@ -5,6 +5,7 @@
 
 路由信号（节点写入 state，路由函数读取）：
 - ``plan_error``：planner 解析失败的信号（成功时置 None）；
+- ``plan_retries``：planner 解析失败的累计重试次数（成功时清零）；
 - ``feedback_decision``：human_feedback 对用户反馈的判定结果
   （accepted / edit_plan / invalid）。
 """
@@ -26,24 +27,31 @@ def route_after_coordinator(state: State) -> Literal["background_investigator", 
 
 def route_after_planner(
     state: State, config: RunnableConfig
-) -> Literal["human_feedback", "reporter", "__end__"]:
-    """planner 之后：进入计划评审、直接产出报告，或终止。
+) -> Literal["planner", "human_feedback", "reporter", "__end__"]:
+    """planner 之后：带反馈重试、进入计划评审、直接产出报告，或终止。
 
-    判定优先级（与原 Command 路由语义一致）：
-    1. 计划轮次已达上限 → reporter（planner 已提前跳过 LLM 调用）；
-    2. 计划解析失败 → 已有既定轮次则 reporter 兜底产出，否则终止；
+    判定优先级：
+    1. 研究轮次已达上限 → reporter（planner 已提前跳过 LLM 调用）；
+    2. 计划解析失败 → 未超重试上限则回 planner 自环重试（planner 会把
+       ``plan_error`` 回注到 prompt 让模型修正）；超限则已有既定研究轮次时
+       reporter 兜底产出，否则终止；
     3. planner 判断背景已充分（has_enough_context）→ reporter；
     4. 其余 → human_feedback 计划评审。
     """
-    plan_iterations = state.get("plan_iterations") or 0
+    research_rounds = state.get("research_rounds") or 0
+    plan_retries = state.get("plan_retries") or 0
     configurable = (config or {}).get("configurable", {})
-    max_plan_iterations = configurable.get("max_plan_iterations", 1)
+    max_research_rounds = configurable.get("max_research_rounds", 1)
+    max_plan_retries = configurable.get("max_plan_retries", 1)
 
-    if plan_iterations >= max_plan_iterations:
+    if research_rounds >= max_research_rounds:
         return "reporter"
 
     if state.get("plan_error"):
-        return "reporter" if plan_iterations > 0 else "__end__"
+        # plan_retries 在每次失败时已由 planner +1；未超上限则允许再试一次
+        if plan_retries <= max_plan_retries:
+            return "planner"
+        return "reporter" if research_rounds > 0 else "__end__"
 
     plan = state.get("current_plan")
     if isinstance(plan, Plan) and plan.has_enough_context:
@@ -59,8 +67,8 @@ def route_after_feedback(
 
     - edit_plan / invalid → 退回 planner 重新规划；
     - accepted 且计划有效 → research_team 执行研究；
-    - accepted 但计划无效 → 已有既定轮次则 reporter 兜底，否则终止
-      （与 route_after_planner 的 plan_error 分支口径一致：> 0）。
+    - accepted 但计划无效 → 已有既定研究轮次则 reporter 兜底，否则终止
+      （与 route_after_planner 的 plan_error 超限分支口径一致：> 0）。
     """
     decision = state.get("feedback_decision")
 
@@ -69,9 +77,9 @@ def route_after_feedback(
 
     # decision == "accepted"（或防御性缺省）：校验计划有效性
     plan = state.get("current_plan")
-    plan_iterations = state.get("plan_iterations") or 0
+    research_rounds = state.get("research_rounds") or 0
     if not isinstance(plan, Plan) or not plan.steps:
-        return "reporter" if plan_iterations > 0 else "__end__"
+        return "reporter" if research_rounds > 0 else "__end__"
     return "research_team"
 
 
