@@ -21,7 +21,8 @@ class ResumeRequest(BaseModel):
     - ``feedback``：以文本修改意见回退到 planner 重新规划，等价于
       ``Command(resume="[EDIT_PLAN] " + content)``；
     - ``edit_plan``：直接提交编辑后的完整计划，等价于
-      ``Command(resume="[ACCEPTED]", update={current_plan: Plan(...), plan_iterations: +1})``。
+      ``Command(resume="[ACCEPTED]", update={current_plan: Plan(...)})``；
+      计划轮次由 human_feedback 节点统一计数。
     """
 
     type: Literal["accepted", "feedback", "edit_plan"] = Field(..., description="恢复类型")

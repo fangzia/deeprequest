@@ -100,24 +100,22 @@ def _build_workflow_input(request: ChatRequest) -> dict:
     }
 
 
-async def _build_resume_command(
-    graph, config: dict, resume: ResumeRequest
-) -> Command:
+def _build_resume_command(resume: ResumeRequest) -> Command:
     """根据恢复请求类型构造 ``Command(resume=...)``。"""
     if resume.type == "accepted":
         return Command(resume="[ACCEPTED]")
     if resume.type == "feedback":
         return Command(resume=f"[EDIT_PLAN] {resume.content or ''}")
 
-    # edit_plan：直接采用前端编辑后的完整计划，计划轮次 +1
+    # edit_plan：直接采用前端编辑后的完整计划。
+    # 只更新 current_plan：计划轮次由 human_feedback 节点在重执行时统一 +1，
+    # 此处再 +1 会因 interrupt 恢复的节点重跑语义被双重计数
     if not resume.plan:
         raise HTTPException(status_code=422, detail="edit_plan 恢复类型必须携带 plan 字段")
     plan = Plan.model_validate(resume.plan)
-    snapshot = await graph.aget_state(config)
-    plan_iterations = (snapshot.values.get("plan_iterations") or 0) + 1
     return Command(
         resume="[ACCEPTED]",
-        update={"current_plan": plan, "plan_iterations": plan_iterations},
+        update={"current_plan": plan},
     )
 
 
@@ -189,7 +187,7 @@ async def research(request: ChatRequest, http_request: Request) -> EventSourceRe
         logger.info(
             "恢复中断的研究（thread_id=%s, resume.type=%s）", thread_id, request.resume.type
         )
-        workflow_input = await _build_resume_command(graph, config, request.resume)
+        workflow_input = _build_resume_command(request.resume)
     else:
         logger.info("启动新的研究（thread_id=%s）", thread_id)
         workflow_input = _build_workflow_input(request)

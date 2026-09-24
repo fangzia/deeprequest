@@ -59,7 +59,8 @@ def route_after_feedback(
 
     - edit_plan / invalid → 退回 planner 重新规划；
     - accepted 且计划有效 → research_team 执行研究；
-    - accepted 但计划无效 → 已有既定轮次则 reporter 兜底，否则终止。
+    - accepted 但计划无效 → 已有既定轮次则 reporter 兜底，否则终止
+      （与 route_after_planner 的 plan_error 分支口径一致：> 0）。
     """
     decision = state.get("feedback_decision")
 
@@ -70,7 +71,7 @@ def route_after_feedback(
     plan = state.get("current_plan")
     plan_iterations = state.get("plan_iterations") or 0
     if not isinstance(plan, Plan) or not plan.steps:
-        return "reporter" if plan_iterations > 1 else "__end__"
+        return "reporter" if plan_iterations > 0 else "__end__"
     return "research_team"
 
 

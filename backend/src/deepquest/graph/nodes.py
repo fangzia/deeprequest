@@ -201,11 +201,18 @@ def background_investigation_node(state: State, config: RunnableConfig) -> dict:
         try:
             parsed = json.loads(searched)
             if isinstance(parsed, list):
-                results_text = "\n\n".join(
-                    f"## {elem.get('title', '无标题')}\n\n{elem.get('content', '无内容')}"
-                    for elem in parsed
-                    if isinstance(elem, dict)
-                )
+                # 格式化时保留 URL，供 planner 评估背景、reporter/引用溯源使用
+                sections = []
+                for elem in parsed:
+                    if not isinstance(elem, dict):
+                        continue
+                    title = elem.get("title", "无标题")
+                    section = f"## {title}\n\n{elem.get('content', '无内容')}"
+                    url = elem.get("url", "")
+                    if url:
+                        section += f"\n\n来源：[{title}]({url})"
+                    sections.append(section)
+                results_text = "\n\n".join(sections)
             elif isinstance(parsed, dict) and "error" in parsed:
                 logger.error("背景调查搜索出错：%s", parsed["error"])
         except json.JSONDecodeError:
@@ -543,7 +550,12 @@ def research_team_node(state: State) -> None:  # noqa: ARG001
 
 
 def reporter_node(state: State, config: RunnableConfig) -> dict:  # noqa: ARG001
-    """记者节点：汇总观察结果与编号来源列表，产出带 [n] 引用的最终报告。"""
+    """记者节点：汇总观察结果与编号来源列表，产出带 [n] 引用的最终报告。
+
+    ``observations`` 为空且存在背景调查结果时（has_enough_context=true
+    直达本节点的路径），兜底注入背景调查结果作为素材，并聚合其来源到
+    ``sources`` 写回 state，保证 [n] 编号与 citation eval 一致。
+    """
     logger.info("reporter 撰写最终报告")
     current_plan = state.get("current_plan")
     locale = state.get("locale", "zh-CN")
@@ -560,8 +572,23 @@ def reporter_node(state: State, config: RunnableConfig) -> dict:  # noqa: ARG001
     }
     invoke_messages = apply_prompt_template("reporter", input_, locale=locale)
 
-    # 注入各步骤的观察结果
-    for observation in state.get("observations", []):
+    # 注入各步骤的观察结果；若没有任何步骤执行过（has_enough_context=true
+    # 直达 reporter 的路径），兜底注入背景调查结果作为唯一素材
+    observations = list(state.get("observations", []))
+    background = state.get("background_investigation_results")
+    sources = list(state.get("sources", []))
+    update: dict = {}
+    if not observations and background:
+        observations = [f"背景调查结果：\n\n{background}"]
+        # 背景调查来源聚合进 sources 并写回 state，
+        # 保证报告 [n] 编号与 citation eval 读取的来源列表一致
+        new_sources = _extract_sources(background, {s.url for s in sources})
+        if new_sources:
+            sources = sources + new_sources
+            update["sources"] = sources
+            logger.info("reporter 兜底注入背景调查，新增 %d 个引用来源", len(new_sources))
+
+    for observation in observations:
         invoke_messages.append(
             HumanMessage(
                 content=f"以下是研究任务的一些观察结果：\n\n{observation}",
@@ -570,7 +597,6 @@ def reporter_node(state: State, config: RunnableConfig) -> dict:  # noqa: ARG001
         )
 
     # 注入编号来源列表，供正文 [n] 引用
-    sources = state.get("sources", [])
     if sources:
         sources_lines = "\n".join(
             f"[{i + 1}] {s.title}（{s.url}）" for i, s in enumerate(sources)
@@ -600,4 +626,5 @@ def reporter_node(state: State, config: RunnableConfig) -> dict:  # noqa: ARG001
     response = get_llm().invoke(invoke_messages)
     response_content = str(response.content)
     logger.info("reporter 报告完成，长度 %d 字符", len(response_content))
-    return {"final_report": response_content}
+    update["final_report"] = response_content
+    return update

@@ -107,16 +107,16 @@ def test_feedback_accepted_valid_plan_routes_to_research_team():
     assert route_after_feedback(state) == "research_team"
 
 
-def test_feedback_accepted_invalid_plan_first_iteration_ends():
-    """首轮接受但计划无效时终止图。"""
+def test_feedback_accepted_invalid_plan_routes_to_reporter():
+    """接受但计划无效、已有既定轮次时兜底进 reporter（与 planner 口径一致：> 0）。"""
     state = {"feedback_decision": "accepted", "plan_iterations": 1, "current_plan": None}
-    assert route_after_feedback(state) == "__end__"
-
-
-def test_feedback_accepted_invalid_plan_with_history_routes_to_reporter():
-    """已有既定轮次、接受但计划无效时兜底进 reporter。"""
-    state = {"feedback_decision": "accepted", "plan_iterations": 2, "current_plan": None}
     assert route_after_feedback(state) == "reporter"
+
+
+def test_feedback_accepted_invalid_plan_without_iterations_ends():
+    """防御分支：接受但计划无效且无任何既定轮次（plan_iterations=0）时终止图。"""
+    state = {"feedback_decision": "accepted", "plan_iterations": 0, "current_plan": None}
+    assert route_after_feedback(state) == "__end__"
 
 
 # ── continue_to_running_research_team ──────────────────────────

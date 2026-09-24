@@ -59,7 +59,10 @@ def get_prompt_template(agent: str, locale: str = "zh-CN", **variables: object) 
         template = _ENV.get_template(f"{agent}.{normalized}.md")
     except TemplateNotFound:
         try:
-            template = _ENV.get_template(f"{agent}.md")
+            # 该 locale 模板缺失时兜底到中文基础模板（项目目前仅提供 zh_CN 版本）。
+            # 模板内通过 {{ locale }} 变量指示输出语言，因此非中文 locale
+            # 仍能获得对应语言的输出，只是 system prompt 文本为中文。
+            template = _ENV.get_template(f"{agent}.zh_CN.md")
         except TemplateNotFound as e:
             raise ValueError(f"未找到角色 {agent} 的 prompt 模板（locale={locale}）") from e
     try:
